@@ -1,10 +1,15 @@
-import os, re
+import os, re, sys, hashlib
 from pprint import pprint
+
 tempFile = os.environ["TEMP"].replace("\\", "/")+"/python-diskpart.txt"
 
 class diskpart:
-	def __init__(self):
+	def __init__(self, fetch_uid=False):
 		self.mainC = "diskpart /s "+tempFile
+		self.selected = False
+		self.opts = {
+			"fetch_uid": fetch_uid
+			}
 		self.parts = {
 		"disk": {
 			0: "disk_num",
@@ -23,6 +28,12 @@ class diskpart:
 			5: "size",
 			6: "status",
 			7: "info"
+		},
+		"partition": {
+			0: "partition",
+			1: "type",
+			2: "size",
+			3: "offset"
 		}}
 		self.listDisk()
 		self.listVolume()
@@ -46,8 +57,7 @@ class diskpart:
 			for part in parts:
 				p = text[parts[part]["begin"]:parts[part]["end"]].replace(" ", "")
 				if part == 0:
-					disks[ind] = {}
-					disks[ind][self.parts["disk"][part]] = int(p.replace("Disk", ""))
+					disks[ind] = {"partitions": {}}
 				elif part == 4 or part == 5:
 					if p == "*":
 						disks[ind][self.parts["disk"][part]] = True
@@ -56,7 +66,21 @@ class diskpart:
 				else:
 					disks[ind][self.parts["disk"][part]] = p
 			ind += 1
+		if self.opts["fetch_uid"]:
+			command = self.mainC+' | findstr /r "Disk.ID:"'
+			bulkC = ""
+			for disk in disks:
+				bulkC += "select disk {}\r\nuniqueid disk\r\n".format(disk)
+			self.write(bulkC)
+			result = self.exec(command).split("\n")[:-1]
+			ind = 0
+			for uid in result:
+				uid = re.subn("(Disk ID: )|[{}]", "", uid)[0]
+				disks[ind]["uid"] = uid
+				disks[ind]["display_id"] = hashlib.md5(uid.encode("utf-8")).hexdigest()[:6]
+				ind += 1
 		self.disks = disks
+		return self.disks
 	def listVolume(self):
 		cmd = "list volume"
 		self.write(cmd)
@@ -72,7 +96,6 @@ class diskpart:
 				p = text[parts[part]["begin"]:parts[part]["end"]].replace(" ", "")
 				if part == 0:
 					volumes[ind] = {}
-					volumes[ind][self.parts["volume"][part]] = int(p.replace("Volume", ""))
 				elif part == 1 or part == 2 or part == 7:
 					if p == "":
 						volumes[ind][self.parts["volume"][part]] = False
@@ -82,6 +105,50 @@ class diskpart:
 					volumes[ind][self.parts["volume"][part]] = p
 			ind += 1
 		self.volumes = volumes
+		return self.volumes
+	def listPartition(self, diskNum):
+		cmd = "select disk {}\nlist partition".format(diskNum)
+		self.write(cmd)
+		command = self.mainC+' | findstr /r "Partition ---"'
+		result = self.exec(command)
+		template = result.split("\n")[1]
+		temp = result.split("\n")[2:-1]
+		partitions = {}
+		parts = self.lister(template, temp)
+		ind=0
+		for text in temp:
+			for part in parts:
+				p = text[parts[part]["begin"]:parts[part]["end"]].replace(" ", "")
+				if part == 0:
+					partitions[ind] = {}
+				elif part == 1:
+					if p == "Unknown":
+						partitions[ind][self.parts["partition"][part]] = False
+					else:
+						partitions[ind][self.parts["partition"][part]] = p
+				else:
+					partitions[ind][self.parts["partition"][part]] = p
+			ind += 1
+		self.disks[diskNum]["partitions"] = partitions
+		pprint(self.disks)
+	def clean(self):
+		if self.selected:
+			cmd = "select disk {}\r\nclean".format(self.selected)
+			self.write(cmd)
+			self.exec(self.mainC)
+		else:
+			raise Exception("You need to select a disk before using this function.")
+
+	def selectDisk(self, diskNum):
+		try:
+			int(diskNum)
+		except:
+			raise ValueError("Expected integer as input but got '{}' instead.".format(diskNum))
+		else:
+			if int(diskNum) <= len(self.disks):
+				self.selected = diskNum
+			else:
+				raise Exception("Selected '{}' disk is not present.".format(diskNum))
 	def lister(self, template, data):
 		lastVal = 0
 		totalLen = 0
@@ -100,9 +167,3 @@ class diskpart:
 			totalLen +=1
 		parts[len(parts)-1]["end"] = totalLen
 		return parts
-		#self.disks = disks
-
-
-test = diskpart()
-pprint(test.disks)
-pprint(test.volumes)

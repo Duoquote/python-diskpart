@@ -7,6 +7,7 @@ class diskpart:
 	def __init__(self, fetch_uid=False):
 		self.mainC = "diskpart /s "+tempFile
 		self.selected = False
+		self.selectedPart = False
 		self.opts = {
 			"fetch_uid": fetch_uid
 			}
@@ -106,39 +107,52 @@ class diskpart:
 			ind += 1
 		self.volumes = volumes
 		return self.volumes
-	def listPartition(self, diskNum):
-		cmd = "select disk {}\nlist partition".format(diskNum)
-		self.write(cmd)
-		command = self.mainC+' | findstr /r "Partition ---"'
-		result = self.exec(command)
-		template = result.split("\n")[1]
-		temp = result.split("\n")[2:-1]
-		partitions = {}
-		parts = self.lister(template, temp)
-		ind=0
-		for text in temp:
-			for part in parts:
-				p = text[parts[part]["begin"]:parts[part]["end"]].replace(" ", "")
-				if part == 0:
-					partitions[ind] = {}
-				elif part == 1:
-					if p == "Unknown":
-						partitions[ind][self.parts["partition"][part]] = False
+	def listPartition(self):
+		if type(self.selected) == int:
+			cmd = "select disk {}\nlist partition".format(self.selected)
+			self.write(cmd)
+			command = self.mainC+' | findstr /r "Partition ---"'
+			result = self.exec(command)
+			template = result.split("\n")[1]
+			temp = result.split("\n")[2:-1]
+			partitions = {}
+			parts = self.lister(template, temp)
+			ind=0
+			for text in temp:
+				for part in parts:
+					p = text[parts[part]["begin"]:parts[part]["end"]].replace(" ", "")
+					if part == 0:
+						partitions[ind] = {}
+					elif part == 1:
+						if p == "Unknown":
+							partitions[ind][self.parts["partition"][part]] = False
+						else:
+							partitions[ind][self.parts["partition"][part]] = p
 					else:
 						partitions[ind][self.parts["partition"][part]] = p
-				else:
-					partitions[ind][self.parts["partition"][part]] = p
-			ind += 1
-		self.disks[diskNum]["partitions"] = partitions
-		pprint(self.disks)
+				ind += 1
+			self.disks[self.selected]["partitions"] = partitions
+			return partitions
+		else:
+			raise Exception("You need to select a disk before using this function.")
 	def clean(self):
-		if self.selected:
+		if type(self.selected) == int:
 			cmd = "select disk {}\r\nclean".format(self.selected)
 			self.write(cmd)
 			self.exec(self.mainC)
 		else:
 			raise Exception("You need to select a disk before using this function.")
-
+	def createPartition(self, partition):
+		if type(self.selected) == int:
+			if partition and type(partition) == str:
+				cmd = "select disk {}\r\ncreate partition {}\r\n".format(self.selected, partition)
+				self.write(cmd)
+				self.exec(self.mainC)
+				self.listPartition()
+			else:
+				raise ValueError("Expected string as input but got '{}' instead.".format(type(partition)))
+		else:
+			raise Exception("You need to select a disk before using this function.")
 	def selectDisk(self, diskNum):
 		try:
 			int(diskNum)
